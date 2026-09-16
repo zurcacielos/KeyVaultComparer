@@ -3,7 +3,7 @@
 Real-Et is a professional developer tool designed to visually compare secrets across multiple Azure Key Vault environments (e.g., Dev, Stg, UAT, QA). It allows you to instantly identify mismatches, missing secrets, and uniform values across your infrastructure.
 
 ## Prerequisites
-- [.NET 9 SDK](https://dotnet.microsoft.com/download)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - [Node.js](https://nodejs.org/) (v18+ recommended)
 - [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
 
