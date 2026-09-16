@@ -229,6 +229,8 @@ const getRelativeTime = (timestamp: number) => {
   return '1+ day ago';
 };
 
+const isSidebarCollapsed = ref(false);
+
 const totalVaultsCount = ref<number | null>(null);
 
 const availableVaults = ref<DiscoveredVault[]>([])
@@ -354,6 +356,7 @@ const loadingValues = ref(false)
 const loadingNames = ref(false)
 const showHistoryDropdown = ref(false)
 const hideHistoryDropdown = () => {
+  appStore.applySecretNameFilter();
   setTimeout(() => { showHistoryDropdown.value = false }, 150)
 }
 const visibleSecrets = ref(new Set<string>())
@@ -782,17 +785,9 @@ const fetchValuesForRow = async (secretName: string) => {
   }
 }
 
-const fetchButtonText = computed(() => {
-  if (loadingValues.value) return 'Fetching visible...';
-  return "Fetch Visible Row's Values";
-});
 
-const fetchButtonTitle = computed(() => {
-  const limit = uiSettings.value.resultLimit;
-  return limit > 0 
-    ? `Fetch the values of the first ${limit} names displayed, as per the limit.` 
-    : 'Fetch all values from all names.';
-});
+
+
 
 const copiedCell = ref<{uri: string, secretName: string} | null>(null);
 
@@ -1016,15 +1011,7 @@ const getValueColor = (colorIndex: number | undefined) => {
 
 
 
-const hasActiveFilters = computed(() => {
-  return uiSettings.value.statusFilter !== 'Any' ||
-         appStore.state.inspectionFilter !== 'None' ||
-         appStore.state.nameFilter !== '' ||
-         uiSettings.value.showStagedOnly ||
-         uiSettings.value.showReusedValues ||
-         uiSettings.value.securityByRow ||
-         uiSettings.value.securityByCol;
-});
+
 
 const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
   if (!statusObj) return '';
@@ -1172,14 +1159,40 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
     <main class="flex-1 overflow-hidden flex flex-col bg-slate-50 p-4 md:p-6 relative z-10">
       
       <!-- Dashboard Tab -->
-      <div v-show="currentTab === 'dashboard'" class="w-full mx-auto space-y-4 flex-1 flex flex-col min-h-0">
+      <div v-show="currentTab === 'dashboard'" class="w-full h-full flex flex-col xl:flex-row gap-4 min-h-0">
       
-      <!-- Configuration Panel -->
-      <div class="shrink-0 bg-white rounded-xl shadow-sm border border-slate-200 p-6 relative z-20">
-        <div class="flex flex-col md:flex-row md:items-center gap-6">
-          
-          <div class="flex-1 flex gap-3 relative">
-            <div class="relative w-full md:w-80">
+      
+        <!-- 1. Left Sidebar -->
+        <div :class="['shrink-0 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 z-20 transition-all duration-300', isSidebarCollapsed ? 'w-12 items-center' : 'w-full xl:w-[340px]']">
+          <div class="p-4 border-b border-slate-100 font-bold text-slate-800 shrink-0 text-lg flex justify-between items-center w-full" :class="{ 'px-2 py-4 justify-center': isSidebarCollapsed }">
+            <span v-if="!isSidebarCollapsed">1. Select & Manage Vaults</span>
+            <button @click="isSidebarCollapsed = !isSidebarCollapsed" class="text-slate-400 hover:text-slate-600 focus:outline-none" :title="isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'">
+              <svg v-if="!isSidebarCollapsed" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M15.707 15.707a1 1 0 01-1.414 0l-5-5a1 1 0 010-1.414l5-5a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 010 1.414zm-6 0a1 1 0 01-1.414 0l-5-5a1 1 0 010-1.414l5-5a1 1 0 011.414 1.414L5.414 10l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd" />
+              </svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M4.293 15.707a1 1 0 010-1.414L8.586 10 4.293 5.707a1 1 0 011.414-1.414l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0zm6 0a1 1 0 010-1.414L14.586 10l-4.293-4.293a1 1 0 011.414-1.414l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
+          <div v-show="!isSidebarCollapsed" class="flex-1 flex flex-col min-h-0">
+            <div class="p-4 flex-1 overflow-y-auto space-y-4">
+            
+            <div class="space-y-2">
+              <span class="text-xs text-slate-500 font-medium uppercase tracking-wider">Subscription</span>
+              <select 
+                v-model="selectedSubscriptionId"
+                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">All Subscriptions</option>
+                <option v-for="sub in subscriptions" :key="sub.id" :value="sub.id">
+                  {{ sub.name }} <template v-if="totalVaultsCount !== null && selectedSubscriptionId === sub.id">({{ totalVaultsCount }})</template>
+                </option>
+              </select>
+            </div>
+
+            <!-- Search Input -->
+            <div class="relative w-full">
               <input 
                 type="text"
                 v-model="searchQuery"
@@ -1199,8 +1212,6 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
               </div>
-
-              <!-- Dropdown Menu -->
               <ul 
                 v-if="showDropdown && unselectedAvailableVaults.length > 0" 
                 class="absolute z-50 w-full mt-1 bg-white border border-slate-200 shadow-lg max-h-60 rounded-md overflow-auto py-1"
@@ -1222,232 +1233,173 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
               </div>
             </div>
 
-          </div>
-
-          <!-- Active Vaults -->
-          <div class="flex-[2] flex flex-wrap items-center gap-2">
-            <div 
-              v-for="(uri, index) in vaultUris" 
-              :key="uri" 
-              class="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-xl text-sm font-medium border border-blue-200 shadow-sm"
-            >
-              <div class="flex flex-col text-left py-0.5">
-                <span class="leading-tight">{{ getVaultName(uri) }}</span>
-                <span class="text-[10px] text-blue-500 font-normal leading-none mt-0.5" style="letter-spacing: 0;">
-                  {{ knownSecretNames[uri]?.length || 0 }} secrets
-                  <template v-if="lastFetched[uri]">• {{ getRelativeTime(lastFetched[uri]) }}</template>
-                </span>
-              </div>
-              <button 
-                @click="removeVault(index)" 
-                class="text-blue-400 hover:text-blue-700 focus:outline-none transition-colors ml-1"
-                title="Remove"
+            <!-- Active Vaults Vertical List -->
+            <div class="space-y-2 mt-4">
+              <div 
+                v-for="(uri, index) in vaultUris" 
+                :key="uri" 
+                class="flex items-center justify-between px-3 py-2.5 bg-blue-50 text-blue-800 rounded-lg text-sm border border-blue-200 shadow-sm"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                </svg>
-              </button>
+                <div class="flex flex-col min-w-0 pr-2">
+                  <span class="font-medium truncate">{{ getVaultName(uri) }}</span>
+                  <span class="text-xs text-blue-500 mt-0.5 truncate flex items-center gap-1">
+                    {{ knownSecretNames[uri]?.length || 0 }} secrets
+                    <template v-if="lastFetched[uri]"><span class="text-[10px]">- {{ getRelativeTime(lastFetched[uri]) }}</span></template>
+                  </span>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button 
+                    @click="fetchValuesForVault(uri)" 
+                    class="text-blue-400 hover:text-blue-700 focus:outline-none transition-colors p-1"
+                    title="Fetch values for this vault"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                  <button 
+                    @click="removeVault(index)" 
+                    class="text-blue-400 hover:text-rose-500 focus:outline-none transition-colors p-1"
+                    title="Remove"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
-            
+          </div>
+          
+          <div class="p-4 border-t border-slate-100 bg-slate-50 text-center rounded-b-xl shrink-0">
+            <p class="text-slate-700 text-[15px] leading-relaxed mb-4 px-2 text-left">
+              Refetch secret names if needed.
+            </p>
             <button 
-              v-if="vaultUris.length > 0"
               @click="refetchNames"
-              :disabled="loadingNames"
-              class="ml-2 px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-colors disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-              title="Refresh secret names without fetching values"
+              :disabled="loadingNames || vaultUris.length === 0"
+              class="w-full py-3 px-4 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              <svg v-if="loadingNames" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
-              </svg>
-              Refetch Secret Names
+              <svg v-if="loadingNames" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+              Add/Sync Secret Names ({{ allSortedNames.length }} total)
             </button>
             <button 
               v-if="vaultUris.length > 0"
               @click="forgetAllNames"
-              class="ml-2 px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-colors flex items-center gap-1.5 shadow-sm"
-              title="Forget all discovered secret names"
+              class="mt-3 w-full py-2 px-4 text-slate-400 hover:text-slate-600 text-xs font-medium hover:bg-slate-200/50 rounded-lg transition-colors"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.029 10.029 0 003.3-4.38 1.651 1.651 0 000-1.185A10.004 10.004 0 009.999 3a9.956 9.956 0 00-4.744 1.194L3.28 2.22zM7.752 6.69l1.092 1.092a2.5 2.5 0 013.374 3.373l1.091 1.091a4 4 0 00-5.557-5.557z" clip-rule="evenodd" />
-                <path d="M10.748 13.93l2.523 2.523a9.987 9.987 0 01-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 010-1.186A10.007 10.007 0 012.839 6.02L6.07 9.252a4 4 0 004.678 4.678z" />
-              </svg>
-              Forget Names
+              Clear All Names
             </button>
           </div>
-
+          </div>
         </div>
 
-        <div class="mt-6 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-100 pt-6">
-          <div class="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-            <div class="relative w-full md:w-64">
-              <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-auto cursor-pointer text-slate-400 hover:text-slate-600" @mousedown.prevent="showHistoryDropdown = !showHistoryDropdown">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                </svg>
-              </div>
-              <input 
-                type="text"
-                :value="appStore.state.nameFilter"
-                @input="appStore.setSecretNameFilter(($event.target as HTMLInputElement).value)"
-                placeholder="Regex filter (CSV)..."
-                class="w-full border border-slate-300 rounded-lg pl-8 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                @keyup.enter="appStore.applySecretNameFilter(); showHistoryDropdown = false"
-                @keydown.esc="showHistoryDropdown = false"
-                @blur="hideHistoryDropdown"
-              />
-              <div v-if="showHistoryDropdown && appStore.availableRecentFilters.length > 0" class="absolute z-50 w-full mt-1 bg-white border border-slate-200 shadow-lg rounded-md overflow-hidden">
-                <ul class="max-h-60 overflow-y-auto">
-                  <li 
-                    v-for="f in appStore.availableRecentFilters" 
-                    :key="f" 
-                    @mousedown.prevent="appStore.setSecretNameFilter(f); appStore.applySecretNameFilter(); showHistoryDropdown = false;"
-                    class="px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 cursor-pointer font-mono truncate"
-                  >
-                    {{ f }}
-                  </li>
-                </ul>
-              </div>
-            </div>
+        <!-- Main Content Area -->
+        <div class="flex-1 flex flex-col min-w-0 min-h-0 gap-4 relative z-10">
+          
+          <!-- Top Ribbon -->
+          <div class="shrink-0 bg-white rounded-xl shadow-sm border border-slate-200 p-4 grid grid-cols-1 lg:grid-cols-12 gap-6 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
             
-            <div class="flex items-center gap-2">
-              <span class="text-sm text-slate-500 font-medium">Limit:</span>
-              <select 
-                v-model="uiSettings.resultLimit"
-                class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <!-- Section 2: Filter -->
+            <div class="lg:col-span-4 flex flex-col gap-3 lg:pr-4">
+              <div class="font-bold text-slate-800 text-[15px]">2. Filter Secrets by Name (Regex)</div>
+              <div class="flex gap-2">
+                <div class="relative flex-1">
+                  <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-auto cursor-pointer text-slate-400 hover:text-slate-600" @mousedown.prevent="showHistoryDropdown = !showHistoryDropdown">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                  </div>
+                  <input 
+                    type="text"
+                    :value="appStore.state.nameFilter"
+                    @input="appStore.setSecretNameFilter(($event.target as any).value)"
+                    @focus="showHistoryDropdown = true"
+                    placeholder="Regex (CSV)..."
+                    class="w-full border border-slate-300 rounded-lg pl-8 pr-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    @keyup.enter="appStore.applySecretNameFilter(); showHistoryDropdown = false"
+                    @keydown.esc="showHistoryDropdown = false"
+                    @blur="hideHistoryDropdown"
+                  />
+                  <div v-if="showHistoryDropdown && appStore.availableRecentFilters.length > 0" class="absolute z-50 w-full mt-1 bg-white border border-slate-200 shadow-lg rounded-md overflow-hidden">
+                    <ul class="max-h-60 overflow-y-auto">
+                      <li v-for="f in appStore.availableRecentFilters" :key="f" @mousedown.prevent="appStore.setSecretNameFilter(f); appStore.applySecretNameFilter(); showHistoryDropdown = false;" class="px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 cursor-pointer font-mono truncate">{{ f }}</li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <span class="text-xs text-slate-500 font-medium">Limit:</span>
+                  <select v-model="uiSettings.resultLimit" class="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option :value="10">10</option>
+                    <option :value="50">50</option>
+                    <option :value="100">100</option>
+                    <option :value="0">All</option>
+                  </select>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <div class="flex items-center gap-3 text-sm text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg w-max">
+                  <span class="text-xs font-medium mr-1">Identicons:</span>
+                  <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900"><input type="checkbox" v-model="uiSettings.identiconsByRow" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" /> By Row</label>
+                  <div class="w-px h-3 bg-slate-300"></div>
+                  <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900"><input type="checkbox" v-model="uiSettings.identiconsByCol" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" /> By Col</label>
+                </div>
+                <div class="flex items-center gap-3 text-sm text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg w-max">
+                  <span class="text-xs font-medium mr-1">Reused:</span>
+                  <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900"><input type="checkbox" v-model="uiSettings.securityByRow" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" /> By Row</label>
+                  <div class="w-px h-3 bg-slate-300"></div>
+                  <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900"><input type="checkbox" v-model="uiSettings.securityByCol" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" /> By Col</label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 3: Fetch -->
+            <div class="lg:col-span-3 flex flex-col gap-3 lg:px-4 pt-4 lg:pt-0">
+              <div class="font-bold text-slate-800 text-[15px]">3. Fetch Specific Values</div>
+              <button 
+                @click="fetchComparison" 
+                :disabled="loadingValues || vaultUris.length === 0 || filteredResults.length === 0"
+                class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                <option :value="10">10</option>
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-                <option :value="0">All</option>
-              </select>
+                <svg v-if="loadingValues" class="animate-spin -ml-1 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                <span v-else>Fetch Values ({{ filteredResults.length }} Filtered)</span>
+              </button>
+              <div class="text-xs text-slate-500 leading-tight">Refine your filter to optimize fetch performance.</div>
             </div>
 
-            <button 
-              @click="fetchComparison" 
-              :disabled="loadingValues || vaultUris.length === 0 || filteredResults.length === 0"
-              class="w-full md:w-auto px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              :title="fetchButtonTitle"
-            >
-              <svg v-if="loadingValues" class="animate-spin -ml-1 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-              {{ fetchButtonText }}
-            </button>
-          </div>
-          <button 
-            @click="runInspectionsOnVisible" 
-            :disabled="loadingValues || vaultUris.length === 0 || filteredResults.length === 0"
-            class="w-full md:w-auto px-6 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            title="Run inspections only on visible rows"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Run Inspections
-          </button>
-        </div>
-
-        <div v-if="results.length > 0" class="mt-4 border-t border-slate-100 pt-4 flex flex-col xl:flex-row items-center justify-end gap-4 bg-slate-50/50 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-4 bg-white border border-slate-200 rounded-lg px-3 py-1.5 h-[34px]">
-              <span class="text-sm text-slate-700 font-medium">Inspection Level:</span>
-              <select 
-                :value="appStore.state.inspectionFilter"
-                @change="appStore.setInspectionFilter(($event.target as HTMLSelectElement).value as any)"
-                class="bg-transparent border-none py-0 pl-1 pr-8 text-sm focus:outline-none focus:ring-0 text-slate-700 cursor-pointer"
+            <!-- Section 4: Analyze -->
+            <div class="lg:col-span-5 flex flex-col gap-3 lg:pl-4 pt-4 lg:pt-0">
+              <div class="font-bold text-slate-800 text-[15px]">4. Analyze & Inspect</div>
+              <div class="flex flex-wrap items-center gap-3">
+                <select 
+                  :value="appStore.state.inspectionFilter"
+                  @change="appStore.setInspectionFilter(($event.target as any).value)"
+                  class="bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+                >
+                  <option value="None">All Secrets</option>
+                  <option value="Any">Any warning</option>
+                  <option value="Critical">Critical</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+                <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" v-model="uiSettings.securityByRow" class="rounded border-slate-300 text-blue-600" /> Vault Equality</label>
+                <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" v-model="uiSettings.showReusedValues" class="rounded border-slate-300 text-blue-600" /> Reused</label>
+                <label class="flex items-center gap-1 text-xs text-amber-700 font-medium bg-amber-50 px-2 py-1.5 rounded border border-amber-200 cursor-pointer ml-auto"><input type="checkbox" v-model="uiSettings.showStagedOnly" class="rounded border-amber-300 text-amber-600" /> Show Staged Only</label>
+                <button @click="clearFilters" class="px-3 py-1.5 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Clear Filters</button>
+              </div>
+              <button 
+                @click="runInspectionsOnVisible" 
+                :disabled="loadingValues || vaultUris.length === 0 || filteredResults.length === 0"
+                class="w-full py-2 bg-[#1e40af] hover:bg-blue-900 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 relative"
               >
-                <option value="None">No Filter</option>
-                <option value="Any">Any Level</option>
-                <option value="Critical">Critical</option>
-                <option value="High">High</option>
-                <option value="Medium">Medium</option>
-                <option value="Low">Low</option>
-              </select>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Run Comprehensive Inspections
+              </button>
             </div>
-            <div class="flex items-center gap-4 bg-white border border-slate-200 rounded-lg px-3 py-1.5 h-[34px]">
-              <span class="text-sm text-slate-700 font-medium mr-2">Identicons:</span>
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="checkbox" v-model="uiSettings.identiconsByRow" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                By Row
-              </label>
-              <div class="w-px h-4 bg-slate-200"></div>
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="checkbox" v-model="uiSettings.identiconsByCol" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                By Col
-              </label>
-            </div>
-            <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 h-[34px]">
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="checkbox" v-model="uiSettings.colorMatchByRow" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                Color match by row
-              </label>
-            </div>
+
           </div>
 
-          <div class="flex flex-wrap items-center justify-end gap-4 ml-auto w-full xl:w-auto">
-            <div class="flex items-center gap-3 bg-white border border-slate-200 rounded-lg px-3 py-1.5 h-[34px]">
-              <span class="text-sm text-slate-700 font-medium mr-1">Vault Equality:</span>
-              
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="radio" value="Any" v-model="uiSettings.statusFilter" class="border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                Any
-              </label>
-              
-              <div class="w-px h-4 bg-slate-200"></div>
-              
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="radio" value="Match" v-model="uiSettings.statusFilter" class="border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                <span class="font-bold">=</span>
-              </label>
-              
-              <div class="w-px h-4 bg-slate-200"></div>
-              
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="radio" value="Mismatch" v-model="uiSettings.statusFilter" class="border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                <span class="font-bold">≠</span>
-              </label>
-              
-              <div class="w-px h-4 bg-slate-200"></div>
-              
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="radio" value="Missing" v-model="uiSettings.statusFilter" class="border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                Missing
-              </label>
-            </div>
-
-            <div class="flex items-center gap-4 bg-white border border-slate-200 rounded-lg px-3 py-1.5 h-[34px]">
-              <span class="text-sm text-slate-700 font-medium mr-1">Reused:</span>
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="checkbox" v-model="uiSettings.securityByRow" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                By Row
-              </label>
-              <div class="w-px h-4 bg-slate-200"></div>
-              <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer hover:text-slate-900 transition-colors">
-                <input type="checkbox" v-model="uiSettings.securityByCol" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                By Col
-              </label>
-            </div>
-
-            <div class="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-3 py-1.5 h-[34px]">
-              <label class="flex items-center gap-1.5 text-sm font-medium cursor-pointer hover:text-amber-900 transition-colors">
-                <input type="checkbox" v-model="uiSettings.showStagedOnly" class="rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer" />
-                Show Staged Only
-              </label>
-            </div>
-            
-            <button 
-              @click="clearFilters"
-              class="px-3 h-[34px] flex items-center justify-center text-sm font-medium transition-colors whitespace-nowrap"
-              :class="hasActiveFilters ? 'text-emerald-700 bg-emerald-50 border-2 border-emerald-500 rounded-lg hover:bg-emerald-100' : 'text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50'"
-              title="Save regex, clear all filters"
-            >
-              Clear Filters
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Results Data Grid -->
-      <div v-if="results.length > 0" class="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 min-h-0 flex flex-col relative z-10">
+          <!-- Results Data Grid -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 min-h-0 flex flex-col relative z-10">
         <div class="overflow-auto flex-1">
           <table class="w-full text-left text-sm whitespace-nowrap border-collapse">
             <thead class="bg-slate-50 text-slate-600 sticky top-0 z-20 shadow-[0_1px_0_0_#e2e8f0]">
@@ -1494,12 +1446,12 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                     </svg>
                   </button>
                 </td>
-                <td class="px-6 py-4 font-medium text-slate-900 border-r border-slate-100 sticky left-[80px] z-10 bg-white group-hover:bg-slate-50/50 shadow-[1px_0_0_0_#f1f5f9] group/namecell">
+                <td class="name-cell-container px-6 py-4 font-medium text-slate-900 border-r border-slate-100 sticky left-[80px] z-10 bg-white group-hover:bg-slate-50/50 shadow-[1px_0_0_0_#f1f5f9] group">
                   <div class="flex items-center justify-between">
                     <span class="truncate pr-2" :title="row.secretName">{{ row.secretName }}</span>
                     <button 
                       @click="fetchValuesForRow(row.secretName)"
-                      class="text-slate-400 hover:text-blue-600 transition-colors bg-white rounded-full p-1.5 shadow-sm border border-slate-200 opacity-0 group-hover/namecell:opacity-100 flex-shrink-0"
+                      class="fetch-btn text-slate-400 hover:text-blue-600 transition-colors bg-white rounded-full p-1.5 shadow-sm border border-slate-200 flex-shrink-0"
                       title="Fetch values for this row"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1530,9 +1482,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                     </svg>
                   </button>
                   <div class="flex items-center justify-center gap-4">
-                    <span v-if="row.vaultValues[uri]?.status === 'Not Retrieved'" class="text-slate-400 italic text-sm font-medium">
-                      ?
-                    </span>
+                    <button v-if="row.vaultValues[uri]?.status === 'Not Retrieved'" @click.stop="fetchValuesForVaultAndNames(uri, [row.secretName])" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[13px] font-semibold py-2 px-4 rounded shadow-sm w-full transition-colors flex items-center justify-center gap-1 mx-2">Click to Fetch</button>
                     <span v-else-if="row.vaultValues[uri]?.status === 'Loading'" class="text-blue-500 italic text-sm font-medium flex items-center gap-1">
                       <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     </span>
@@ -1590,14 +1540,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
         </div>
       </div>
 
-      <!-- Empty State -->
-      <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 border-dashed p-12 flex flex-col items-center justify-center text-center relative z-10">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-slate-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-        <h3 class="text-lg font-medium text-slate-900">No comparisons yet</h3>
-        <p class="mt-1 text-slate-500">Select multiple Key Vaults from the configuration panel and click Compare to view differences.</p>
-      </div>
+
 
       <!-- Azure Auth Error Modal -->
       <div v-if="showAuthError" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
@@ -1632,7 +1575,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
 
       </div>
       
-      <!-- Staged Changes Tab -->
+      </div>      <!-- Staged Changes Tab -->
       <div v-if="currentTab === 'staged'" class="w-full mx-auto flex-1 flex flex-col min-h-0">
         <div v-if="stagedChanges.length === 0" class="flex-1 flex flex-col items-center justify-center text-slate-500">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1802,5 +1745,14 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
 }
 .secret-scroll:hover::-webkit-scrollbar-thumb {
   background-color: #94a3b8;
+}
+
+/* Fetch Button Visibility */
+.fetch-btn {
+  opacity: 0;
+}
+.name-cell-container:hover .fetch-btn,
+.fetch-btn:focus {
+  opacity: 1;
 }
 </style>
