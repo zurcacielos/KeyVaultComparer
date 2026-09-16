@@ -367,6 +367,13 @@ const toggleHighlight = (val: string | null | undefined) => {
   highlightedValue.value = highlightedValue.value === val ? null : val
 }
 
+const handleGridEscape = (e: KeyboardEvent) => {
+  highlightedValue.value = null;
+  if (e.target instanceof HTMLElement) {
+    e.target.blur();
+  }
+}
+
 const loadKnownSecretNames = (): Record<string, SecretMetadata[]> => {
   try {
     const saved = localStorage.getItem('savedKnownSecretNames');
@@ -505,6 +512,8 @@ const clearFilters = () => {
   uiSettings.value.statusFilter = 'Any';
   uiSettings.value.showReusedValues = false;
   uiSettings.value.showStagedOnly = false;
+  uiSettings.value.securityByRow = false;
+  uiSettings.value.securityByCol = false;
   showHistoryDropdown.value = false;
 };
 
@@ -1281,7 +1290,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
               class="w-full py-3 px-4 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <svg v-if="loadingNames" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-              Add/Sync Secret Names ({{ allSortedNames.length }} total)
+              Retrieve Secret Names ({{ allSortedNames.length }} total)
             </button>
             <button 
               v-if="vaultUris.length > 0"
@@ -1362,7 +1371,15 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                 <svg v-if="loadingValues" class="animate-spin -ml-1 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 <span v-else>Fetch Values ({{ filteredResults.length }} Filtered)</span>
               </button>
-              <div class="text-xs text-slate-500 leading-tight">Refine your filter to optimize fetch performance.</div>
+              <div class="text-xs text-slate-500 leading-tight mt-1.5">
+                Refine your filter to optimize fetch performance, or click 
+                <span class="inline-flex items-center justify-center bg-white rounded-full p-1 shadow-sm border border-slate-200 mx-0.5 align-middle -mt-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </span>
+                on columns/rows to load only those.
+              </div>
             </div>
 
             <!-- Section 4: Analyze -->
@@ -1395,13 +1412,11 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                 Run Comprehensive Inspections
               </button>
             </div>
-
           </div>
-
           <!-- Results Data Grid -->
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 min-h-0 flex flex-col relative z-10">
         <div class="overflow-auto flex-1">
-          <table class="w-full text-left text-sm whitespace-nowrap border-collapse">
+          <table class="w-full text-left text-sm whitespace-nowrap border-collapse" @keydown.esc="handleGridEscape">
             <thead class="bg-slate-50 text-slate-600 sticky top-0 z-20 shadow-[0_1px_0_0_#e2e8f0]">
               <tr>
                 <th class="w-10 px-2 py-4 text-center sticky left-0 z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0] text-xs text-slate-400">#</th>
@@ -1537,6 +1552,37 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
               </tr>
             </tbody>
           </table>
+        </div>
+        
+        <!-- Empty State Overlay -->
+        <div v-if="filteredResults.length === 0" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/60 backdrop-blur-sm rounded-xl text-center border-2 border-dashed border-slate-200 m-4">
+          
+          <!-- Case 1: No data loaded at all -->
+          <div v-if="results.length === 0" class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-slate-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h3 class="text-xl font-bold text-slate-800">No comparisons yet</h3>
+            <p class="mt-2 text-slate-500 max-w-sm">Select Key Vaults from the side panel to view their contents and begin comparing.</p>
+          </div>
+
+          <!-- Case 2: Data loaded but completely filtered out -->
+          <div v-else class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center">
+            <div class="h-16 w-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold text-slate-800">No secrets match your filters</h3>
+            <p class="mt-2 text-slate-500 max-w-sm mb-6">Your current filter settings are hiding all {{ results.length }} loaded secrets.</p>
+            <button @click="clearFilters" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+              Clear all filters
+            </button>
+          </div>
+
         </div>
       </div>
 
