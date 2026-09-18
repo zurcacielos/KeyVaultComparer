@@ -12,8 +12,18 @@ builder.Services.AddOpenApi();
 // Register the global TokenCredential
 builder.Services.AddSingleton<TokenCredential>(sp => 
 {
-    // Use AzureCliCredential as the Single Source of Truth for local dev
-    return new AzureCliCredential();
+    // Use DefaultAzureCredential, but exclude slow credentials like ManagedIdentity when running locally
+    var options = new DefaultAzureCredentialOptions();
+    if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Local"))
+    {
+        options.ExcludeManagedIdentityCredential = true; // Prevents hanging on 169.254.169.254 timeout locally
+        options.ExcludeWorkloadIdentityCredential = true;
+        options.ExcludeVisualStudioCredential = true; // Prevent VS from overriding az login
+        options.ExcludeVisualStudioCodeCredential = true;
+        options.ExcludeAzurePowerShellCredential = true; // Prevent PowerShell from overriding az login
+        options.ExcludeAzureDeveloperCliCredential = true;
+    }
+    return new DefaultAzureCredential(options);
 });
 
 builder.Services.AddSingleton<KeyVaultService>();
@@ -34,7 +44,7 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Local"))
 {
     app.MapOpenApi();
 }
@@ -50,10 +60,12 @@ app.Use(async (context, next) =>
     }
     catch (Exception ex) when (ex is Azure.Identity.CredentialUnavailableException || 
                                ex is Azure.Identity.AuthenticationFailedException ||
+                               (ex is Azure.RequestFailedException rfe && (rfe.Status == 401 || rfe.Status == 403)) ||
                                ex.ToString().Contains("az login", StringComparison.OrdinalIgnoreCase) ||
                                ex.ToString().Contains("AADSTS", StringComparison.OrdinalIgnoreCase) ||
                                ex.ToString().Contains("interactive authentication", StringComparison.OrdinalIgnoreCase) ||
-                               ex.ToString().Contains("refresh token", StringComparison.OrdinalIgnoreCase))
+                               ex.ToString().Contains("refresh token", StringComparison.OrdinalIgnoreCase) ||
+                               ex.ToString().Contains("No subscriptions found", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.StatusCode = 401;
         context.Response.ContentType = "application/json";

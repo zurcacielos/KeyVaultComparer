@@ -248,14 +248,17 @@ const results = computed<SecretComparisonRow[]>(() => {
     };
     
     vaultUris.value.forEach(uri => {
-      const knownNamesForVault = knownSecretNames.value[uri] || [];
+      const knownNamesForVault = knownSecretNames.value[uri]?.secrets || [];
       const vaultMetaForName = knownNamesForVault.find(k => k.name === name);
       let baseStatus: SecretValueStatus;
       
-      if (!vaultMetaForName) {
+      const d = vaultData.value[uri]?.[name];
+      if (d && d.status !== 'Missing' && d.status !== 'Not Retrieved') {
+        // If we explicitly fetched and got a specific status (e.g. Forbidden, Error, Present)
+        baseStatus = { ...d, colorIndex: 0 };
+      } else if (!vaultMetaForName) {
         baseStatus = { status: 'Missing', value: null, colorIndex: 0 };
       } else {
-        const d = vaultData.value[uri]?.[name];
         baseStatus = d ? { ...d, colorIndex: 0 } : { status: 'Not Retrieved', value: null, colorIndex: 0 };
       }
 
@@ -374,27 +377,27 @@ const handleGridEscape = (e: KeyboardEvent) => {
   }
 }
 
-const loadKnownSecretNames = (): Record<string, SecretMetadata[]> => {
+const loadKnownSecretNames = (): Record<string, { secrets: SecretMetadata[], errorMessage?: string }> => {
   try {
-    const saved = localStorage.getItem('savedKnownSecretNames');
+    const saved = localStorage.getItem('savedVaultSyncResult');
     if (saved) {
       const parsed = JSON.parse(saved);
       if (typeof parsed !== 'object' || parsed === null) return {};
       for (const uri in parsed) {
-        if (!Array.isArray(parsed[uri])) continue;
-        if (parsed[uri].length > 0 && typeof parsed[uri][0] === 'string') {
+        if (!parsed[uri] || !Array.isArray(parsed[uri].secrets)) continue;
+        if (parsed[uri].secrets.length > 0 && typeof parsed[uri].secrets[0] === 'string') {
           return {}; // Old cache format, reset
         }
-        parsed[uri] = parsed[uri].map((n: any) => ({ ...n, name: (n?.name || '').toString().toUpperCase() }));
+        parsed[uri].secrets = parsed[uri].secrets.map((n: any) => ({ ...n, name: (n?.name || '').toString().toUpperCase() }));
       }
       return parsed;
     }
   } catch (e) { return {}; }
   return {};
 };
-const knownSecretNames = ref<Record<string, SecretMetadata[]>>(loadKnownSecretNames())
+const knownSecretNames = ref<Record<string, { secrets: SecretMetadata[], errorMessage?: string }>>(loadKnownSecretNames())
 watch(knownSecretNames, (newVal) => {
-  localStorage.setItem('savedKnownSecretNames', JSON.stringify(newVal));
+  localStorage.setItem('savedVaultSyncResult', JSON.stringify(newVal));
 }, { deep: true });
 const vaultData = ref<Record<string, Record<string, SecretValueStatus & { colorIndex?: number }>>>({})
 
@@ -548,8 +551,12 @@ const refetchNames = async () => {
     if (!response.ok) throw new Error('Failed to fetch keys');
     const data = await response.json();
     
-    for (const [uri, names] of Object.entries(data)) {
-      knownSecretNames.value[uri] = (names as SecretMetadata[]).map(n => ({...n, name: n.name.toUpperCase()}));
+    for (const [uri, res] of Object.entries(data)) {
+      const result = res as { secrets: SecretMetadata[], errorMessage?: string };
+      knownSecretNames.value[uri] = {
+        secrets: result.secrets.map(n => ({...n, name: n.name.toUpperCase()})),
+        errorMessage: result.errorMessage
+      };
     }
   } catch (error) {
     console.error('Error fetching names:', error);
@@ -573,12 +580,16 @@ const fetchVaultKeys = async () => {
     });
     if (response.ok) {
       const data = await response.json();
-      const upperData: Record<string, SecretMetadata[]> = {};
-      for (const [uri, names] of Object.entries(data)) {
-        upperData[uri] = (names as any[]).map(n => {
-          if (typeof n === 'string') return { name: n.toUpperCase() } as SecretMetadata;
-          return {...n, name: (n?.name || '').toString().toUpperCase()} as SecretMetadata;
-        });
+      const upperData: Record<string, { secrets: SecretMetadata[], errorMessage?: string }> = {};
+      for (const [uri, res] of Object.entries(data)) {
+        const result = res as any;
+        upperData[uri] = {
+          secrets: result.secrets.map((n: any) => {
+            if (typeof n === 'string') return { name: n.toUpperCase() } as SecretMetadata;
+            return {...n, name: (n?.name || '').toString().toUpperCase()} as SecretMetadata;
+          }),
+          errorMessage: result.errorMessage
+        };
       }
       knownSecretNames.value = upperData;
     }
@@ -593,7 +604,7 @@ watch(vaultUris, () => {
 
 const allSortedNames = computed(() => {
   const set = new Set<string>();
-  Object.values(knownSecretNames.value).flat().forEach(n => set.add(n.name));
+  Object.values(knownSecretNames.value).flatMap(v => v.secrets || []).forEach(n => set.add(n.name));
   return Array.from(set).sort();
 });
 
@@ -743,6 +754,7 @@ const removeVault = (index: number) => {
 
 const forgetAllNames = () => {
   knownSecretNames.value = {};
+  vaultData.value = {};
 }
 
 const fetchValuesForVaultAndNames = async (uri: string, namesToFetch: string[]) => {
@@ -887,6 +899,50 @@ const downloadScript = () => {
   URL.revokeObjectURL(url);
 };
 
+const showGrantAccessModal = ref(false);
+
+const downloadGrantScript = () => {
+  let script = `# Key Vault Comparer - Grant Permissions\n`;
+  script += `Write-Host "Verifying Azure CLI login..."\n`;
+  script += `$oid = az ad signed-in-user show --query id -o tsv 2>$null\n`;
+  script += `if (-not $oid) {\n`;
+  script += `    Write-Error "Not logged into Azure. Please run 'az login' first."\n`;
+  script += `    exit\n`;
+  script += `}\n`;
+  script += `Write-Host "Logged in as OID: $oid"\n\n`;
+
+  let hasVaults = false;
+  vaultUris.value.forEach(uri => {
+    const errorMsg = knownSecretNames.value[uri]?.errorMessage;
+    if (errorMsg) {
+      hasVaults = true;
+      const vaultName = getVaultName(uri);
+      if (errorMsg.toLowerCase().includes('rbac')) {
+        script += `# Granting RBAC on ${vaultName}\n`;
+        script += `$scope = az keyvault show --name "${vaultName}" --query id -o tsv\n`;
+        script += `az role assignment create --role "Key Vault Secrets Officer" --assignee-object-id $oid --assignee-principal-type User --scope $scope\n\n`;
+      } else {
+        script += `# Granting Access Policies on ${vaultName}\n`;
+        script += `az keyvault set-policy --name "${vaultName}" --object-id $oid --secret-permissions get list set\n\n`;
+      }
+    }
+  });
+
+  if (!hasVaults) return;
+
+  script += `Write-Host "Done! Please refresh the Key Vault Comparer dashboard." -ForegroundColor Green\n`;
+
+  const blob = new Blob([script], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'grant-vault-permissions.ps1';
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  showGrantAccessModal.value = false;
+};
+
 const runInspectionsOnVisible = () => {
   results.value.forEach(row => {
     vaultUris.value.forEach(uri => {
@@ -914,7 +970,7 @@ const runInspectionsOnVisible = () => {
           }
         }
 
-        const metadata = (knownSecretNames.value[uri] || []).find(m => m.name === row.secretName);
+        const metadata = (knownSecretNames.value[uri]?.secrets || []).find(m => m.name === row.secretName);
         if (metadata) {
           const metaInspections = analyzeMetadata(metadata);
           finalInspections.push(...metaInspections);
@@ -946,6 +1002,119 @@ const runInspectionsOnVisible = () => {
       }
     });
   });
+  hasInspectionsRun.value = true;
+};
+
+const hasInspectionsRun = ref(false);
+
+const clearInspections = () => {
+  results.value.forEach(row => {
+    vaultUris.value.forEach(uri => {
+      const currentVal = row.vaultValues[uri];
+      if (currentVal) {
+        currentVal.inspections = undefined;
+        currentVal.highestSeverity = undefined;
+      }
+      const d = vaultData.value[uri]?.[row.secretName];
+      if (d) {
+        d.inspections = undefined;
+        d.highestSeverity = undefined;
+      }
+    });
+  });
+  hasInspectionsRun.value = false;
+};
+
+const reportFilter = ref({
+  Critical: true,
+  High: true,
+  Medium: true,
+  Low: true
+});
+
+const rawInspectionReportData = computed(() => {
+  if (!hasInspectionsRun.value) return [];
+  const findings: { vault: string; secret: string; rule: string; severity: string; message: string }[] = [];
+  results.value.forEach(row => {
+    vaultUris.value.forEach(uri => {
+      const val = row.vaultValues[uri];
+      if (val?.inspections) {
+        val.inspections.forEach(ins => {
+          findings.push({
+            vault: getVaultName(uri),
+            secret: row.secretName,
+            rule: ins.ruleName,
+            severity: ins.severity,
+            message: ins.message
+          });
+        });
+      }
+    });
+  });
+  const severityScore: Record<string, number> = { 'Critical': 4, 'High': 3, 'Medium': 2, 'Low': 1 };
+  findings.sort((a, b) => severityScore[b.severity] - severityScore[a.severity] || a.vault.localeCompare(b.vault) || a.secret.localeCompare(b.secret));
+  return findings;
+});
+
+const inspectionReportData = computed(() => {
+  return rawInspectionReportData.value.filter(f => reportFilter.value[f.severity as keyof typeof reportFilter.value]);
+});
+
+const reportStats = computed(() => {
+  if (!hasInspectionsRun.value) return null;
+  const totalSecrets = new Set(vaultUris.value.flatMap(uri => knownSecretNames.value[uri]?.secrets?.map(s => s.name) || [])).size;
+  const analyzedSecrets = results.value.length;
+  const totalVaults = vaultUris.value.length;
+  const totalVulns = rawInspectionReportData.value.length;
+  return `Analyzed ${analyzedSecrets} secret names out of ${totalSecrets}, from ${totalVaults} vaults. ${totalVulns} vulnerabilities found.`;
+});
+
+const generateMarkdownReport = () => {
+  const findings = inspectionReportData.value;
+  if (findings.length === 0) return '*No inspection findings.*';
+
+  let md = `# Security & Quality Inspections Report\n\n`;
+  md += `> ${reportStats.value}\n\n`;
+  md += `| Severity | Vault | Secret Name | Rule | Details |\n`;
+  md += `|----------|-------|-------------|------|---------|\n`;
+  
+  findings.forEach(f => {
+    md += `| **${f.severity}** | \`${f.vault}\` | \`${f.secret}\` | ${f.rule} | ${f.message.replace(/\|/g, '\\|')} |\n`;
+  });
+  
+  return md;
+};
+
+const copyMarkdownReport = async () => {
+  try {
+    const md = generateMarkdownReport();
+    await navigator.clipboard.writeText(md);
+    alert('Markdown report copied to clipboard. You can paste it directly in JIRA, Confluence, or GitHub.');
+  } catch (err) {
+    alert('Failed to copy to clipboard.');
+  }
+};
+
+const downloadCsvReport = () => {
+  const findings = inspectionReportData.value;
+  if (findings.length === 0) {
+    alert('No data to download.');
+    return;
+  }
+  
+  let csv = 'Severity,Vault,Secret Name,Rule,Details\n';
+  findings.forEach(f => {
+    const escapeCsv = (str: string) => `"${str.replace(/"/g, '""')}"`;
+    csv += `${f.severity},${escapeCsv(f.vault)},${escapeCsv(f.secret)},${escapeCsv(f.rule)},${escapeCsv(f.message)}\n`;
+  });
+  
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `inspections_report_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 const filteredResults = computed(() => {
@@ -998,7 +1167,45 @@ const filteredResults = computed(() => {
   return res;
 })
 
+const vaultsWithErrors = computed(() => {
+  return vaultUris.value.filter(uri => !!knownSecretNames.value[uri]?.errorMessage);
+});
 
+// Column Resize State
+const secretNameColumnWidth = ref<number>(
+  Number(localStorage.getItem('secretNameColumnWidth')) || 300
+);
+watch(secretNameColumnWidth, (val) => {
+  localStorage.setItem('secretNameColumnWidth', val.toString());
+});
+
+const isResizing = ref(false);
+let startX = 0;
+let startWidth = 0;
+
+const onResizerMouseDown = (e: MouseEvent) => {
+  isResizing.value = true;
+  startX = e.clientX;
+  startWidth = secretNameColumnWidth.value;
+  document.addEventListener('mousemove', onResizerMouseMove);
+  document.addEventListener('mouseup', onResizerMouseUp);
+  document.body.style.userSelect = 'none';
+  document.body.style.cursor = 'col-resize';
+};
+
+const onResizerMouseMove = (e: MouseEvent) => {
+  if (!isResizing.value) return;
+  const delta = e.clientX - startX;
+  secretNameColumnWidth.value = Math.max(150, Math.min(startWidth + delta, 800));
+};
+
+const onResizerMouseUp = () => {
+  isResizing.value = false;
+  document.removeEventListener('mousemove', onResizerMouseMove);
+  document.removeEventListener('mouseup', onResizerMouseUp);
+  document.body.style.userSelect = '';
+  document.body.style.cursor = '';
+};
 
 const getVaultName = (uri: string) => {
   try {
@@ -1032,6 +1239,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
       case 'match': baseClass = 'bg-emerald-50/50'; break;
       case 'mismatch': baseClass = 'bg-amber-50/50'; break;
       case 'missing': baseClass = 'bg-rose-50/50'; break;
+      case 'forbidden': baseClass = 'bg-red-50/50'; break;
     }
   }
   if (statusObj.highestSeverity === 'Critical') {
@@ -1092,6 +1300,13 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
             Staged Changes
           </button>
           <button 
+            @click="currentTab = 'inspections'"
+            class="px-3 py-1.5 text-sm font-semibold rounded-md transition-colors"
+            :class="currentTab === 'inspections' ? 'bg-slate-100 text-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'"
+          >
+            Inspections Report
+          </button>
+          <button 
             @click="currentTab = 'logs'"
             class="px-3 py-1.5 text-sm font-semibold rounded-md transition-colors"
             :class="currentTab === 'logs' ? 'bg-slate-100 text-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'"
@@ -1116,21 +1331,6 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
 
         <div class="flex items-center gap-3">
           <template v-if="profile && profile.email !== 'Unknown User'">
-            <div class="flex items-center gap-2">
-              <span class="text-xs text-slate-500 font-medium uppercase tracking-wider hidden md:block">Sub:</span>
-              <select 
-                v-model="selectedSubscriptionId"
-                class="border-none bg-transparent px-1 py-1 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-0 w-32 sm:w-48 truncate cursor-pointer hover:bg-slate-50 rounded"
-              >
-                <option value="">All Subscriptions</option>
-                <option v-for="sub in subscriptions" :key="sub.id" :value="sub.id">
-                  {{ sub.name }}
-                  <template v-if="totalVaultsCount !== null && selectedSubscriptionId === sub.id">
-                    ({{ totalVaultsCount }} vaults)
-                  </template>
-                </option>
-              </select>
-            </div>
             <div 
               class="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold shadow-inner text-sm"
               :title="profile.email"
@@ -1167,6 +1367,21 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
     <!-- Main Content Area -->
     <main class="flex-1 overflow-hidden flex flex-col bg-slate-50 p-4 md:p-6 relative z-10">
       
+      <!-- Global Permissions Error Banner -->
+      <div v-if="vaultsWithErrors.length > 0" class="shrink-0 mb-4 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-lg shadow-sm border border-amber-100">
+        <div class="flex items-center">
+          <svg class="h-5 w-5 text-amber-500 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+          </svg>
+          <div class="text-amber-800 text-sm flex-1">
+            <p class="font-medium">
+              You don't have permission over {{ vaultsWithErrors.length }} of the selected vault{{ vaultsWithErrors.length > 1 ? 's' : '' }}.
+              <button @click="showGrantAccessModal = true" class="font-bold underline hover:text-amber-900 ml-1">Grant yourself permissions...</button>
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Dashboard Tab -->
       <div v-show="currentTab === 'dashboard'" class="w-full h-full flex flex-col xl:flex-row gap-4 min-h-0">
       
@@ -1251,8 +1466,12 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
               >
                 <div class="flex flex-col min-w-0 pr-2">
                   <span class="font-medium truncate">{{ getVaultName(uri) }}</span>
-                  <span class="text-xs text-blue-500 mt-0.5 truncate flex items-center gap-1">
-                    {{ knownSecretNames[uri]?.length || 0 }} secrets
+                  <div v-if="knownSecretNames[uri]?.errorMessage" class="text-[11px] text-rose-500 font-bold mt-0.5 whitespace-normal leading-tight">
+                    {{ knownSecretNames[uri]?.errorMessage }}
+                    <button @click="showGrantAccessModal = true" class="text-blue-600 underline hover:text-blue-800 ml-1">Grant Access</button>
+                  </div>
+                  <span v-else class="text-xs text-blue-500 mt-0.5 truncate flex items-center gap-1">
+                    {{ knownSecretNames[uri]?.secrets?.length || 0 }} secrets
                     <template v-if="lastFetched[uri]"><span class="text-[10px]">- {{ getRelativeTime(lastFetched[uri]) }}</span></template>
                   </span>
                 </div>
@@ -1297,7 +1516,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
               @click="forgetAllNames"
               class="mt-3 w-full py-2 px-4 text-slate-400 hover:text-slate-600 text-xs font-medium hover:bg-slate-200/50 rounded-lg transition-colors"
             >
-              Clear All Names
+              Forget all names/values
             </button>
           </div>
           </div>
@@ -1403,13 +1622,29 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                 <label class="flex items-center gap-1 text-xs text-amber-700 font-medium bg-amber-50 px-2 py-1.5 rounded border border-amber-200 cursor-pointer ml-auto"><input type="checkbox" v-model="uiSettings.showStagedOnly" class="rounded border-amber-300 text-amber-600" /> Show Staged Only</label>
                 <button @click="clearFilters" class="px-3 py-1.5 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Clear Filters</button>
               </div>
+              <div v-if="hasInspectionsRun" class="flex items-center gap-2 w-full">
+                <button 
+                  @click="clearInspections" 
+                  class="flex-1 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold shadow-sm transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  Clear Inspections
+                </button>
+                <button 
+                  @click="currentTab = 'inspections'" 
+                  class="flex-[0.5] py-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold shadow-sm transition-colors flex items-center justify-center gap-2"
+                >
+                  See Report
+                </button>
+              </div>
               <button 
+                v-else
                 @click="runInspectionsOnVisible" 
                 :disabled="loadingValues || vaultUris.length === 0 || filteredResults.length === 0"
                 class="w-full py-2 bg-[#1e40af] hover:bg-blue-900 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 relative"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Run Comprehensive Inspections
+                Run Inspections
               </button>
             </div>
           </div>
@@ -1419,14 +1654,25 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
           <table class="w-full text-left text-sm whitespace-nowrap border-collapse" @keydown.esc="handleGridEscape">
             <thead class="bg-slate-50 text-slate-600 sticky top-0 z-20 shadow-[0_1px_0_0_#e2e8f0]">
               <tr>
-                <th class="w-10 px-2 py-4 text-center sticky left-0 z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0] text-xs text-slate-400">#</th>
-                <th class="w-10 px-2 py-4 text-center sticky left-[40px] z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]">
+                <th class="w-10 min-w-[40px] max-w-[40px] px-2 py-4 text-center sticky left-0 z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0] text-xs text-slate-400">#</th>
+                <th class="w-10 min-w-[40px] max-w-[40px] px-2 py-4 text-center sticky left-[39px] z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mx-auto text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z" /><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" /></svg>
                 </th>
-                <th class="px-6 py-4 font-semibold tracking-wider sticky left-[80px] z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]">Secret Name</th>
-                <th v-for="uri in vaultUris" :key="uri" class="px-6 py-4 font-semibold tracking-wider bg-slate-50">
+                <th 
+                  class="px-6 py-4 font-semibold tracking-wider sticky z-30 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
+                  :style="{ left: '78px', width: `${secretNameColumnWidth}px`, minWidth: `${secretNameColumnWidth}px`, maxWidth: `${secretNameColumnWidth}px` }"
+                >
+                  Secret Name
+                  <div 
+                    class="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize flex justify-end z-40 group/resizer"
+                    @mousedown.prevent="onResizerMouseDown"
+                  >
+                    <div class="h-full w-[2px] bg-slate-300 group-hover/resizer:bg-blue-400 transition-colors" :class="{'!bg-blue-500': isResizing}"></div>
+                  </div>
+                </th>
+                <th v-for="uri in vaultUris" :key="uri" class="px-6 py-4 font-semibold tracking-wider bg-slate-50" :title="knownSecretNames[uri]?.errorMessage">
                   <div class="flex items-center justify-between">
-                    <span class="text-slate-900">{{ getVaultName(uri) }}</span>
+                    <span :class="knownSecretNames[uri]?.errorMessage ? 'text-rose-600' : 'text-slate-900'">{{ getVaultName(uri) }}</span>
                     <button 
                       @click="fetchValuesForVault(uri)" 
                       class="text-slate-400 hover:text-blue-600 transition-colors bg-white rounded-full p-1 shadow-sm border border-slate-200"
@@ -1442,10 +1688,10 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
             </thead>
             <tbody class="divide-y divide-slate-100">
               <tr v-for="(row, index) in filteredResults" :key="row.secretName" class="hover:bg-slate-50/50 transition-colors group">
-                <td class="w-10 px-2 py-4 text-center text-xs text-slate-400 font-normal whitespace-nowrap border-r border-slate-100 sticky left-0 z-10 bg-white group-hover:bg-slate-50/50 shadow-[1px_0_0_0_#f1f5f9]">
+                <td class="w-10 min-w-[40px] max-w-[40px] px-2 py-4 text-center text-xs text-slate-400 font-normal whitespace-nowrap border-r border-slate-100 sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[1px_0_0_0_#f1f5f9]">
                   {{ index + 1 }}
                 </td>
-                <td class="w-10 px-2 py-4 text-center border-r border-slate-100 sticky left-[40px] z-10 bg-white group-hover:bg-slate-50/50 shadow-[1px_0_0_0_#f1f5f9]">
+                <td class="w-10 min-w-[40px] max-w-[40px] px-2 py-4 text-center border-r border-slate-100 sticky left-[39px] z-10 bg-white group-hover:bg-slate-50 shadow-[1px_0_0_0_#f1f5f9]">
                   <button 
                     @click="toggleVisibility(row.secretName)"
                     class="text-slate-400 hover:text-slate-700 focus:outline-none transition-colors"
@@ -1461,9 +1707,12 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                     </svg>
                   </button>
                 </td>
-                <td class="name-cell-container px-6 py-4 font-medium text-slate-900 border-r border-slate-100 sticky left-[80px] z-10 bg-white group-hover:bg-slate-50/50 shadow-[1px_0_0_0_#f1f5f9] group">
-                  <div class="flex items-center justify-between">
-                    <span class="truncate pr-2" :title="row.secretName">{{ row.secretName }}</span>
+                <td 
+                  class="name-cell-container px-6 py-4 font-medium text-slate-900 border-r border-slate-100 sticky z-10 bg-white group-hover:bg-slate-50 shadow-[1px_0_0_0_#f1f5f9] group"
+                  :style="{ left: '78px', width: `${secretNameColumnWidth}px`, minWidth: `${secretNameColumnWidth}px`, maxWidth: `${secretNameColumnWidth}px` }"
+                >
+                  <div class="flex items-center justify-between w-full h-full">
+                    <span class="pr-2 line-clamp-2 break-all whitespace-normal" :title="row.secretName">{{ row.secretName }}</span>
                     <button 
                       @click="fetchValuesForRow(row.secretName)"
                       class="fetch-btn text-slate-400 hover:text-blue-600 transition-colors bg-white rounded-full p-1.5 shadow-sm border border-slate-200 flex-shrink-0"
@@ -1503,6 +1752,9 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                     </span>
                     <span v-else-if="row.vaultValues[uri]?.status === 'Missing'" class="text-rose-500 italic text-sm font-medium">
                       Not Found
+                    </span>
+                    <span v-else-if="row.vaultValues[uri]?.status === 'Forbidden'" class="text-red-600 font-bold text-sm bg-red-50 px-2 py-1 rounded cursor-help shadow-sm border border-red-200" :title="row.vaultValues[uri]?.errorMessage">
+                      [403 Forbidden]
                     </span>
                     <span v-else-if="row.vaultValues[uri]?.status === 'Error'" class="text-rose-500 italic text-sm font-medium">
                       Error
@@ -1703,6 +1955,94 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
         </div>
       </div>
 
+      <!-- Inspections Report Tab -->
+      <div v-show="currentTab === 'inspections'" class="w-full h-full flex flex-col min-h-0 bg-white rounded-xl shadow-sm border border-slate-200">
+        <div class="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800">Inspections Report</h2>
+            <p class="text-sm text-slate-500 mt-1">Review security vulnerabilities and quality issues found in the loaded vaults.</p>
+            <p v-if="reportStats" class="text-xs font-semibold text-blue-600 mt-2 bg-blue-50 inline-block px-2 py-1 rounded">{{ reportStats }}</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 mr-4 border-r border-slate-200 pr-4">
+               <label class="flex items-center gap-1 text-sm font-semibold text-rose-700 cursor-pointer"><input type="checkbox" v-model="reportFilter.Critical" class="rounded border-rose-300 text-rose-600 focus:ring-rose-500" /> Critical</label>
+               <label class="flex items-center gap-1 text-sm font-semibold text-orange-700 cursor-pointer"><input type="checkbox" v-model="reportFilter.High" class="rounded border-orange-300 text-orange-600 focus:ring-orange-500" /> High</label>
+               <label class="flex items-center gap-1 text-sm font-semibold text-amber-700 cursor-pointer"><input type="checkbox" v-model="reportFilter.Medium" class="rounded border-amber-300 text-amber-600 focus:ring-amber-500" /> Medium</label>
+               <label class="flex items-center gap-1 text-sm font-semibold text-slate-700 cursor-pointer"><input type="checkbox" v-model="reportFilter.Low" class="rounded border-slate-300 text-slate-600 focus:ring-slate-500" /> Low</label>
+            </div>
+            <button 
+              @click="copyMarkdownReport"
+              class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+              title="Copy as Markdown for JIRA/Confluence"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+              </svg>
+              Copy Markdown
+            </button>
+            <button 
+              @click="downloadCsvReport"
+              class="px-4 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download CSV
+            </button>
+          </div>
+        </div>
+        
+        <div class="flex-1 overflow-auto p-6 bg-slate-50/50">
+          <div v-if="!hasInspectionsRun" class="text-center py-20 text-slate-500">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-slate-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p class="text-lg font-medium">No inspections have run yet.</p>
+            <p class="text-sm mt-1">Go to the Dashboard and run inspections to view the report.</p>
+          </div>
+          <div v-else-if="inspectionReportData.length === 0" class="text-center py-20 text-emerald-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-emerald-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p class="text-lg font-medium">Zero vulnerabilities found!</p>
+            <p class="text-sm mt-1 text-emerald-500">All visible secrets passed the inspections.</p>
+          </div>
+          <div v-else class="space-y-4">
+            <div 
+              v-for="(f, i) in inspectionReportData" 
+              :key="i"
+              class="bg-white border rounded-lg p-4 shadow-sm flex items-start gap-4"
+              :class="{
+                'border-rose-200 bg-rose-50/30': f.severity === 'Critical',
+                'border-orange-200 bg-orange-50/30': f.severity === 'High',
+                'border-amber-200 bg-amber-50/30': f.severity === 'Medium',
+                'border-slate-200 bg-slate-50/50': f.severity === 'Low'
+              }"
+            >
+              <div class="mt-1">
+                <span 
+                  class="px-2.5 py-1 rounded text-xs font-bold"
+                  :class="{
+                    'bg-rose-100 text-rose-700': f.severity === 'Critical',
+                    'bg-orange-100 text-orange-700': f.severity === 'High',
+                    'bg-amber-100 text-amber-700': f.severity === 'Medium',
+                    'bg-slate-200 text-slate-700': f.severity === 'Low'
+                  }"
+                >{{ f.severity }}</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline gap-2 mb-1">
+                  <span class="font-bold text-slate-900 truncate">{{ f.secret }}</span>
+                  <span class="text-xs text-slate-500 font-mono truncate">@ {{ f.vault }}</span>
+                </div>
+                <div class="font-semibold text-slate-700 text-sm">{{ f.rule }}</div>
+                <div class="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{{ f.message }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Logs Tab -->
       <div v-if="currentTab === 'logs'" class="w-full h-full flex flex-col items-center justify-center text-slate-500">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1770,6 +2110,46 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
         </div>
         <div class="p-4 bg-slate-50 border-t border-slate-100 text-right">
           <button @click="showHelpDialog = false" class="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grant Access Modal -->
+    <div v-if="showGrantAccessModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden transform transition-all">
+        <div class="p-6">
+          <div class="flex items-center gap-4 mb-4 text-blue-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <h3 class="text-xl font-bold text-slate-900">Grant Permissions</h3>
+          </div>
+          <p class="text-slate-600 mb-4 text-sm">
+            You lack access to one or more vaults. Download the script below to automatically grant yourself <code class="font-mono text-slate-800 bg-slate-100 px-1 rounded">get</code>, <code class="font-mono text-slate-800 bg-slate-100 px-1 rounded">list</code>, and <code class="font-mono text-slate-800 bg-slate-100 px-1 rounded">set</code> permissions.
+          </p>
+          <ol class="text-sm text-slate-700 list-decimal pl-5 space-y-2 mb-6">
+            <li>Click <strong>Download Script</strong> below.</li>
+            <li>Open a terminal and run <code class="bg-slate-100 px-1 rounded font-mono">az login</code> if you aren't logged in.</li>
+            <li>Run the downloaded <code class="bg-slate-100 px-1 rounded font-mono">grant-vault-permissions.ps1</code> script.</li>
+            <li>Refresh this dashboard.</li>
+          </ol>
+          <div class="flex justify-end gap-3">
+            <button 
+              @click="showGrantAccessModal = false" 
+              class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-2 px-4 rounded-lg transition-colors shadow-sm text-sm"
+            >
+              Cancel
+            </button>
+            <button 
+              @click="downloadGrantScript" 
+              class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors shadow-sm text-sm flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download Script
+            </button>
+          </div>
         </div>
       </div>
     </div>

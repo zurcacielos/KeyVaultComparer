@@ -18,13 +18,13 @@ namespace KeyVaultComparer.Api.Services
             _credential = credential;
         }
 
-        public async Task<Dictionary<string, List<SecretMetadata>>> GetAllSecretNamesAsync(List<string> vaultUris)
+        public async Task<Dictionary<string, VaultSyncResult>> GetAllSecretNamesAsync(List<string> vaultUris)
         {
-            var results = new ConcurrentDictionary<string, List<SecretMetadata>>();
+            var results = new ConcurrentDictionary<string, VaultSyncResult>();
 
             if (vaultUris == null || !vaultUris.Any())
             {
-                return new Dictionary<string, List<SecretMetadata>>();
+                return new Dictionary<string, VaultSyncResult>();
             }
 
             var propTasks = vaultUris.Select(async uri =>
@@ -46,7 +46,17 @@ namespace KeyVaultComparer.Api.Services
                             });
                         }
                     }
-                    results[uri] = vaultNames;
+                    results[uri] = new VaultSyncResult { Secrets = vaultNames };
+                }
+                catch (Azure.RequestFailedException ex) when (ex.Status == 403)
+                {
+                    results[uri] = new VaultSyncResult 
+                    { 
+                        Secrets = new List<SecretMetadata>(),
+                        ErrorMessage = ex.Message.Contains("RBAC", StringComparison.OrdinalIgnoreCase) 
+                            ? "Missing RBAC configuration (Key Vault Secrets User role)" 
+                            : "Missing Get/List Vault Access Policies"
+                    };
                 }
                 catch (Exception ex)
                 {
@@ -56,13 +66,16 @@ namespace KeyVaultComparer.Api.Services
                     {
                         throw;
                     }
-                    results[uri] = vaultNames;
+                    results[uri] = new VaultSyncResult { Secrets = vaultNames, ErrorMessage = ex.Message };
                 }
             });
 
             await Task.WhenAll(propTasks);
             
-            return results.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.OrderBy(n => n.Name).ToList());
+            return results.ToDictionary(kvp => kvp.Key, kvp => {
+                kvp.Value.Secrets = kvp.Value.Secrets.OrderBy(n => n.Name).ToList();
+                return kvp.Value;
+            });
         }
 
         public async Task<Dictionary<string, SecretValueStatus>> GetSecretValuesAsync(string vaultUri, List<string> secretNames)
@@ -95,6 +108,18 @@ namespace KeyVaultComparer.Api.Services
                         {
                             Value = null,
                             Status = "Missing"
+                        };
+                    }
+                    catch (Azure.RequestFailedException ex) when (ex.Status == 403)
+                    {
+                        // Missing RBAC or Access Policies
+                        results[name] = new SecretValueStatus
+                        {
+                            Value = null,
+                            Status = "Forbidden",
+                            ErrorMessage = ex.Message.Contains("RBAC", StringComparison.OrdinalIgnoreCase) 
+                                ? "Missing RBAC configuration (Key Vault Secrets User role)" 
+                                : "Missing Get/List Vault Access Policies"
                         };
                     }
                     catch (Exception ex)

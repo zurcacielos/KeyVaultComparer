@@ -76,7 +76,9 @@ namespace KeyVaultComparer.Api.Services
             {
                 Console.WriteLine($"Error fetching profile via injected credential: {ex.Message}");
                 if (ex is AuthenticationFailedException || ex is CredentialUnavailableException || 
-                    ex.ToString().Contains("AADSTS") || ex.ToString().Contains("az login"))
+                    (ex is Azure.RequestFailedException rfe && (rfe.Status == 401 || rfe.Status == 403)) ||
+                    ex.ToString().Contains("AADSTS") || ex.ToString().Contains("az login") ||
+                    ex.ToString().Contains("No subscriptions found"))
                 {
                     throw; // Bubble up to trigger 401 in middleware
                 }

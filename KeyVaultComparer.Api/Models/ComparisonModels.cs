@@ -35,6 +35,7 @@ namespace KeyVaultComparer.Api.Models
         /// </summary>
         public string Status { get; set; } = "Missing";
         public int ColorIndex { get; set; } = 0;
+        public string? ErrorMessage { get; set; }
     }
 
     public class DiscoveredVault
@@ -49,5 +50,11 @@ namespace KeyVaultComparer.Api.Models
         public System.DateTimeOffset? CreatedOn { get; set; }
         public System.DateTimeOffset? UpdatedOn { get; set; }
         public System.DateTimeOffset? ExpiresOn { get; set; }
+    }
+
+    public class VaultSyncResult
+    {
+        public List<SecretMetadata> Secrets { get; set; } = new();
+        public string? ErrorMessage { get; set; }
     }
 }

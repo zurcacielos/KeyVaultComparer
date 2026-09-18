@@ -4,16 +4,16 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host " Starting Real-Et Azure Key Vault Comparer" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
-# Ensure Azure CLI is logged in
+# Check if Azure CLI is logged in
 $azStatus = az account show 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Azure CLI is not logged in. Please run 'az login' first." -ForegroundColor Red
-    exit 1
+    Write-Host "WARNING: Azure CLI is not logged in. Ensure you have configured authentication via Visual Studio, Rider, or Environment Variables." -ForegroundColor Yellow
+} else {
+    Write-Host "Azure CLI is logged in successfully." -ForegroundColor Green
 }
-Write-Host "Azure CLI is logged in successfully." -ForegroundColor Green
 
 # Start Backend
-Write-Host "Starting Backend API (.NET 9)..." -ForegroundColor Yellow
+Write-Host "Starting Backend API (.NET 10)..." -ForegroundColor Yellow
 $backendProcess = Start-Process -FilePath "dotnet" -ArgumentList "run" -WorkingDirectory ".\KeyVaultComparer.Api" -PassThru -NoNewWindow
 Start-Sleep -Seconds 3
 

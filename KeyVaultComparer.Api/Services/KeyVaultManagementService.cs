@@ -87,7 +87,9 @@ namespace KeyVaultComparer.Api.Services
             {
                 Console.WriteLine($"Error fetching vaults from Resource Graph: {ex.Message}");
                 if (ex is AuthenticationFailedException || ex is CredentialUnavailableException || 
-                    ex.ToString().Contains("AADSTS") || ex.ToString().Contains("az login"))
+                    (ex is Azure.RequestFailedException rfe && (rfe.Status == 401 || rfe.Status == 403)) ||
+                    ex.ToString().Contains("AADSTS") || ex.ToString().Contains("az login") ||
+                    ex.ToString().Contains("No subscriptions found"))
                 {
                     throw;
                 }
@@ -115,7 +117,9 @@ namespace KeyVaultComparer.Api.Services
             {
                 Console.WriteLine($"Error fetching subscriptions: {ex.Message}");
                 if (ex is AuthenticationFailedException || ex is CredentialUnavailableException || 
-                    ex.ToString().Contains("AADSTS") || ex.ToString().Contains("az login"))
+                    (ex is Azure.RequestFailedException rfe && (rfe.Status == 401 || rfe.Status == 403)) ||
+                    ex.ToString().Contains("AADSTS") || ex.ToString().Contains("az login") ||
+                    ex.ToString().Contains("No subscriptions found"))
                 {
                     throw;
                 }
