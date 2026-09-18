@@ -1,6 +1,6 @@
-# Real-Et: Azure Key Vault Comparer
+# KeyVaultComparer: Azure Key Vault Comparer
 
-Real-Et is a professional developer tool designed to visually compare secrets across multiple Azure Key Vault environments (e.g., Dev, Stg, UAT, QA). It allows you to instantly identify mismatches, missing secrets, and uniform values across your infrastructure.
+KeyVaultComparer is a professional developer tool designed to visually compare secrets across multiple Azure Key Vault environments (e.g., Dev, Stg, UAT, QA). It allows you to instantly identify mismatches, missing secrets, and uniform values across your infrastructure.
 
 ## Prerequisites
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)

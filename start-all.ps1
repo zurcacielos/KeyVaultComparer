@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host " Starting Real-Et Azure Key Vault Comparer" -ForegroundColor Cyan
+Write-Host " Starting KeyVaultComparer..." -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
 # Check if Azure CLI is logged in
