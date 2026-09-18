@@ -916,8 +916,7 @@ const applyStagedChanges = async () => {
       secretName: c.secretName,
       newValue: c.newValue
     }));
-    
-    const response = await fetch('http://localhost:5032/api/vault/apply', {
+    const response = await apiFetch('/api/vault/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
