@@ -1333,10 +1333,19 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
           </button>
           <button 
             @click="currentTab = 'staged'"
-            class="px-3 py-1.5 text-sm font-semibold rounded-md transition-colors"
-            :class="currentTab === 'staged' ? 'bg-slate-100 text-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'"
+            class="px-3 py-1.5 text-sm font-semibold rounded-md transition-all flex items-center gap-2"
+            :class="currentTab === 'staged' 
+              ? 'bg-slate-100 text-blue-600' 
+              : (stagedChanges.length > 0 ? 'bg-amber-50 text-amber-800 hover:bg-amber-100' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')"
           >
             Staged Changes
+            <span 
+              v-if="stagedChanges.length > 0" 
+              class="px-2 py-0.5 rounded-full text-xs font-bold"
+              :class="currentTab === 'staged' ? 'bg-blue-200 text-blue-800' : 'bg-amber-500 text-white shadow-sm animate-pulse'"
+            >
+              {{ stagedChanges.length }}
+            </span>
           </button>
           <button 
             @click="currentTab = 'inspections'"
