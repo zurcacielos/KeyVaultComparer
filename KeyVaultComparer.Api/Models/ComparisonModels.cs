@@ -57,4 +57,11 @@ namespace KeyVaultComparer.Api.Models
         public List<SecretMetadata> Secrets { get; set; } = new();
         public string? ErrorMessage { get; set; }
     }
+
+    public class StagedChangeRequest
+    {
+        public string VaultUri { get; set; } = string.Empty;
+        public string SecretName { get; set; } = string.Empty;
+        public string NewValue { get; set; } = string.Empty;
+    }
 }

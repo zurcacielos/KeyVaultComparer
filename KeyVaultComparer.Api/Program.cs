@@ -87,6 +87,17 @@ app.MapPost("/api/vault/values", async ([FromBody] SecretValuesRequest request, 
 })
 .WithName("GetVaultValues");
 
+app.MapPost("/api/vault/apply", async ([FromBody] List<StagedChangeRequest> request, KeyVaultService service) =>
+{
+    var errors = await service.ApplyChangesAsync(request);
+    if (errors.Any()) 
+    {
+        return Results.BadRequest(new { errors });
+    }
+    return Results.Ok(new { message = "Changes applied successfully." });
+})
+.WithName("ApplyVaultChanges");
+
 app.MapGet("/api/vaults", async ([FromQuery] string? query, [FromQuery] string? subscriptionId, KeyVaultManagementService service) =>
 {
     var vaults = await service.GetAvailableVaultsAsync(query, subscriptionId);

@@ -147,5 +147,21 @@ namespace KeyVaultComparer.Api.Services
 
             return results.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
         }
+
+        public async Task<List<string>> ApplyChangesAsync(List<StagedChangeRequest> changes)
+        {
+            var errors = new ConcurrentBag<string>();
+            var tasks = changes.Select(async change => 
+            {
+                try {
+                    var client = new SecretClient(new Uri(change.VaultUri), _credential);
+                    await client.SetSecretAsync(change.SecretName, change.NewValue);
+                } catch(Exception ex) {
+                    errors.Add($"Failed to update {change.SecretName} in {change.VaultUri}: {ex.Message}");
+                }
+            });
+            await Task.WhenAll(tasks);
+            return errors.ToList();
+        }
     }
 }
