@@ -925,7 +925,7 @@ const applyStagedChanges = async () => {
     if (response.ok) {
       alert('Changes applied successfully! Refreshing dashboard...');
       stagedChanges.value.splice(0, toApply.length);
-      await fetchSecretValues();
+      await fetchComparison();
     } else {
       const err = await response.json();
       alert('Some errors occurred while applying changes:\n' + (err.errors ? err.errors.join('\n') : JSON.stringify(err)));
