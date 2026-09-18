@@ -1617,8 +1617,7 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
                   <option value="Medium">Medium</option>
                   <option value="Low">Low</option>
                 </select>
-                <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" v-model="uiSettings.securityByRow" class="rounded border-slate-300 text-blue-600" /> Vault Equality</label>
-                <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" v-model="uiSettings.showReusedValues" class="rounded border-slate-300 text-blue-600" /> Reused</label>
+
                 <label class="flex items-center gap-1 text-xs text-amber-700 font-medium bg-amber-50 px-2 py-1.5 rounded border border-amber-200 cursor-pointer ml-auto"><input type="checkbox" v-model="uiSettings.showStagedOnly" class="rounded border-amber-300 text-amber-600" /> Show Staged Only</label>
                 <button @click="clearFilters" class="px-3 py-1.5 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Clear Filters</button>
               </div>
