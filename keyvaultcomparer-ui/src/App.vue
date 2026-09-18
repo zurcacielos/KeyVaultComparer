@@ -899,6 +899,46 @@ const downloadScript = () => {
   URL.revokeObjectURL(url);
 };
 
+const isApplying = ref(false);
+
+const applyStagedChanges = async () => {
+  if (stagedChanges.value.length === 0) return;
+  const toApply = stagedChanges.value.slice(0, 5);
+  
+  if (!confirm(`Are you sure you want to apply ${toApply.length} change(s) directly to Azure Key Vault? This action cannot be easily undone.`)) {
+    return;
+  }
+
+  isApplying.value = true;
+  try {
+    const payload = toApply.map(c => ({
+      vaultUri: c.vaultUri,
+      secretName: c.secretName,
+      newValue: c.newValue
+    }));
+    
+    const response = await fetch('http://localhost:5032/api/vault/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (response.ok) {
+      alert('Changes applied successfully! Refreshing dashboard...');
+      stagedChanges.value.splice(0, toApply.length);
+      await fetchSecretValues();
+    } else {
+      const err = await response.json();
+      alert('Some errors occurred while applying changes:\n' + (err.errors ? err.errors.join('\n') : JSON.stringify(err)));
+    }
+  } catch (error) {
+    console.error('Error applying changes:', error);
+    alert('Failed to contact the backend to apply changes.');
+  } finally {
+    isApplying.value = false;
+  }
+};
+
 const showGrantAccessModal = ref(false);
 
 const downloadGrantScript = () => {
