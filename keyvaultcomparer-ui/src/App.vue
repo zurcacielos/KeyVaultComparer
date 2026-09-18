@@ -2117,7 +2117,9 @@ const getCellClasses = (statusObj: SecretValueStatus | undefined) => {
             <li>Search and select multiple vaults from your Azure Subscriptions.</li>
             <li>Identify missing, mismatched, or identical secret values instantly.</li>
             <li>Analyze value entropy, duplication, and potential vulnerabilities.</li>
-            <li>Stage changes and review them before deployment.</li>
+            <li>
+              Stage changes and review them before deployment. Use <strong>Ctrl+C / Ctrl+V</strong> (or Cmd on Mac) to copy values from one cell to another. These pasted values will enter as "Staged changes". Then, in the <strong>Staged Changes</strong> tab, you can apply them up to 5 at a time, or generate a PowerShell script to review and run manually.
+            </li>
           </ul>
         </div>
         <div class="p-4 bg-slate-50 border-t border-slate-100 text-right">
