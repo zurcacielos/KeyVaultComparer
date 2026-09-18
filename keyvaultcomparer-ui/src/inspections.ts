@@ -72,7 +72,37 @@ export const IGNORED_VALUES = new Set(['true', 'false', '0', '1', 'yes', 'no']);
 
 export const analyzeSecret = (name: string, value: string): { inspections: InspectionResult[], highestSeverity: 'Low' | 'Medium' | 'High' | 'Critical' | undefined } => {
   const inspections: InspectionResult[] = [];
-  if (!value || IGNORED_VALUES.has(value.toLowerCase())) return { inspections, highestSeverity: undefined };
+  
+  // Name Inspections
+  if (name.length > 60) {
+    inspections.push({ ruleName: 'Suspicious Name (Length)', severity: 'Medium', message: `Name is exceptionally long (${name.length} chars). Consider refactoring.` });
+  }
+  
+  const guidRegex = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+  if (guidRegex.test(name)) {
+    inspections.push({ ruleName: 'Suspicious Name (GUID)', severity: 'Medium', message: 'Name is a UUID/GUID. This degrades observability and manual rotation.' });
+  } else {
+    const nameEntropy = calculateEntropy(name);
+    if (nameEntropy > 4.2 && name.length > 20) {
+      inspections.push({ ruleName: 'Suspicious Name (High Entropy)', severity: 'High', message: `Name has high entropy (${nameEntropy.toFixed(2)}). Ensure sensitive data is not leaked in the name.` });
+    }
+  }
+
+  const getHighestSeverity = (): 'Low' | 'Medium' | 'High' | 'Critical' | undefined => {
+    let highest: 'Low' | 'Medium' | 'High' | 'Critical' | undefined = undefined;
+    const severityScore = { 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4 };
+    let maxScore = 0;
+    for (const ins of inspections) {
+      const score = severityScore[ins.severity];
+      if (score > maxScore) {
+        maxScore = score;
+        highest = ins.severity;
+      }
+    }
+    return highest;
+  };
+
+  if (!value || IGNORED_VALUES.has(value.toLowerCase())) return { inspections, highestSeverity: getHighestSeverity() };
 
   for (const pattern of DANGEROUS_PATTERNS) {
     if (pattern.regex.test(value)) {
@@ -109,16 +139,5 @@ export const analyzeSecret = (name: string, value: string): { inspections: Inspe
     }
   }
 
-  let highestSeverity: 'Low' | 'Medium' | 'High' | 'Critical' | undefined = undefined;
-  const severityScore = { 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4 };
-  let maxScore = 0;
-  for (const ins of inspections) {
-    const score = severityScore[ins.severity];
-    if (score > maxScore) {
-      maxScore = score;
-      highestSeverity = ins.severity;
-    }
-  }
-
-  return { inspections, highestSeverity };
+  return { inspections, highestSeverity: getHighestSeverity() };
 };
